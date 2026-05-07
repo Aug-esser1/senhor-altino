@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirmação de Presença - Sr. Altino</title>
+  <style>
+    :root {
+      --bg: #070909;
+      --accent: #22f27a;
+      --accent-dark: #10cf5f;
+      --text: #f4f4f0;
+      --muted: #b6b8b3;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, rgba(34,242,122,0.12), transparent 30%),
+                  radial-gradient(circle at bottom right, rgba(34,242,122,0.07), transparent 30%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+    .card {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      padding: 36px 28px;
+      max-width: 380px;
+      width: 100%;
+      backdrop-filter: blur(18px);
+    }
+    .icon { font-size: 56px; margin-bottom: 16px; display: block; }
+    h1 { font-family: Georgia, serif; font-size: 26px; margin-bottom: 10px; letter-spacing: -0.02em; }
+    .highlight { color: var(--accent); }
+    p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
+    .event-name {
+      font-size: 17px; font-weight: 700; color: var(--text);
+      margin: 16px 0; padding: 14px;
+      background: rgba(34,242,122,0.08);
+      border: 1px solid rgba(34,242,122,0.2);
+      border-radius: 12px;
+    }
+    .status-ok {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(34,242,122,0.12);
+      border: 1px solid rgba(34,242,122,0.3);
+      color: var(--accent);
+      padding: 10px 20px; border-radius: 999px;
+      font-size: 13px; font-weight: 700; margin-top: 20px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 12px rgba(34,242,122,0.8);
+    }
+    .brand { margin-top: 32px; font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+    .already {
+      color: var(--muted); font-size: 13px; margin-top: 16px;
+      padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.04);
+    }
+    .spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 2px solid rgba(34,242,122,0.3);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .7s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="icon" id="pageIcon">⏳</span>
+    <h1 id="pageTitle">Confirmando <span class="highlight">presença...</span></h1>
+    <div class="event-name" id="eventName"><span class="spinner"></span></div>
+    <p id="pageMsg">Aguarde um momento.</p>
+    <div class="status-ok" id="statusOk" style="display:none;">
+      <span class="dot"></span> Confirmação registrada
+    </div>
+    <div class="already" id="alreadyMsg" style="display:none;">
+      Você já havia confirmado presença anteriormente.
+    </div>
+  </div>
+  <div class="brand">SR. ALTINO BAR · Osasco, SP</div>
+
+  <script src="supabase-config.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const cId  = params.get('c');
+    const tel  = params.get('t');
+    const nome = params.get('n') ? decodeURIComponent(params.get('n')) : 'Convidado';
+
+    document.getElementById('pageTitle').innerHTML = `Olá, <span class="highlight">${nome}!</span>`;
+
+    async function confirmar() {
+      // 1. Buscar nome do evento no Supabase
+      let eventName = 'Evento Sr. Altino';
+      try {
+        if (cId) {
+          const camps = await supabase.select('campanhas', `id=eq.${cId}&select=titulo_interno`);
+          if (camps && camps.length) eventName = camps[0].titulo_interno;
+        }
+      } catch(e) { console.warn('Campanha não encontrada:', e); }
+      document.getElementById('eventName').textContent = eventName;
+
+      // 2. Verificar se já confirmou (usando lista_vip como base — whatsapp + campanha)
+      //    Aqui usamos localStorage como cache local para evitar dupla confirmação na mesma sessão
+      const key = `conf_${cId}_${tel}`;
+      const jaConfirmouLocal = localStorage.getItem(key);
+
+      if (jaConfirmouLocal) {
+        document.getElementById('pageIcon').textContent = '✅';
+        document.getElementById('pageMsg').textContent = 'Sua presença já estava confirmada. Te esperamos! 🍻';
+        document.getElementById('alreadyMsg').style.display = 'block';
+        return;
+      }
+
+      // 3. Registrar confirmação: atualiza total_leads_enviados da campanha
+      //    e salva localmente
+      try {
+        // Incrementar total_leads_enviados na campanha
+        if (cId) {
+          const camps = await supabase.select('campanhas', `id=eq.${cId}&select=id,total_leads_enviados`);
+          if (camps && camps.length) {
+            const atual = camps[0].total_leads_enviados || 0;
+            await supabase.update('campanhas', { total_leads_enviados: atual + 1 }, { id: cId });
+          }
+        }
+
+        // Salvar no localStorage para não contar duas vezes
+        localStorage.setItem(key, new Date().toISOString());
+
+        document.getElementById('pageIcon').textContent = '🎉';
+        document.getElementById('pageMsg').textContent = 'Sua presença está confirmada. Te esperamos no Sr. Altino! 🍻';
+        document.getElementById('statusOk').style.display = 'inline-flex';
+
+      } catch(err) {
+        console.error('Erro ao registrar confirmação:', err);
+        document.getElementById('pageIcon').textContent = '⚠️';
+        document.getElementById('pageMsg').textContent = 'Ocorreu um erro. Mas pode vir, te esperamos! 🍻';
+      }
+    }
+
+    confirmar();
+  </script>
+</body>
+</html>
